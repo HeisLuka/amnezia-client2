@@ -459,7 +459,7 @@ bool WindowsRouteMonitor::addExclusionRoutes(
     } else {
       quint32 buffer = address.toIPv4Address();
       data->DestinationPrefix.Prefix.Ipv4.sin_addr.s_addr = htonl(buffer);
-      data->DestinationPrefix.Prefix.Ipv4.sin6_family = AF_INET;
+      data->DestinationPrefix.Prefix.Ipv4.sin_family = AF_INET;
     }
     data->DestinationPrefix.PrefixLength = prefix.prefixLength();
     data->NextHop.si_family = data->DestinationPrefix.Prefix.si_family;
