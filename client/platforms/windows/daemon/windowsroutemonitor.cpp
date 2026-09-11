@@ -9,6 +9,7 @@
 
 #include "leakdetector.h"
 #include "logger.h"
+#include "windowsroutecapturepolicy.h"
 
 namespace {
 Logger logger("WindowsRouteMonitor");
@@ -313,23 +314,12 @@ void WindowsRouteMonitor::updateCapturedRoutes(int family, void* ptable) {
   QSet<IPAddress> captureFailures;
   for (ULONG i = 0; i < table->NumEntries; i++) {
     MIB_IPFORWARD_ROW2* row = &table->Table[i];
-    // Ignore routes into the VPN interface.
-    if (row->InterfaceLuid.Value == m_luid) {
+    const bool routeExcluded = isRouteExcluded(&row->DestinationPrefix);
+    if (!WindowsRouteCapturePolicy::shouldCaptureRoute(
+            row, m_luid, routeExcluded, EXCLUSION_ROUTE_METRIC)) {
       continue;
     }
-    // Ignore the default route
-    if (row->DestinationPrefix.PrefixLength == 0) {
-      continue;
-    }
-    // Ignore routes of our own creation.
-    if ((row->Protocol == MIB_IPPROTO_NETMGMT) &&
-        (row->Metric == EXCLUSION_ROUTE_METRIC)) {
-      continue;
-    }
-    // Ignore routes which should be excluded.
-    if (isRouteExcluded(&row->DestinationPrefix)) {
-      continue;
-    }
+
     QHostAddress destination = prefixToAddress(&row->DestinationPrefix);
     if (destination.isLoopback() || destination.isBroadcast() ||
         destination.isLinkLocal() || destination.isMulticast()) {
@@ -597,7 +587,6 @@ bool WindowsRouteMonitor::deleteExclusionRoute(const IPAddress& prefix) {
   delete data;
   return true;
 }
-
 void WindowsRouteMonitor::flushRouteTable(
     QHash<IPAddress, MIB_IPFORWARD_ROW2*>& table) {
   for (auto i = table.begin(); i != table.end(); i++) {
