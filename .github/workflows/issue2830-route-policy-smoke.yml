@@ -1,0 +1,25 @@
+name: Issue 2830 route policy smoke
+
+on:
+  push:
+    branches:
+      - 'analysis/issue-2830-ci'
+
+permissions:
+  contents: read
+
+jobs:
+  windows-route-policy-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Compile standalone policy smoke
+        shell: cmd
+        run: >-
+          cl /nologo /std:c++17 /EHsc /I. tools\issue2830_route_policy_smoke.cpp /Fe:issue2830_route_policy_smoke.exe /link iphlpapi.lib ws2_32.lib
+      - name: Run standalone policy smoke
+        shell: cmd
+        run: issue2830_route_policy_smoke.exe
