@@ -1,0 +1,185 @@
+name: Xray endpoint validation
+
+on:
+  push:
+    branches:
+      - 'ci/xray-endpoint-validation'
+
+permissions:
+  contents: read
+
+env:
+  QT_MIRROR: https://mirrors.ocf.berkeley.edu/qt/
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare isolated JVM test project
+        shell: bash
+        run: |
+          TEST_PROJECT="$RUNNER_TEMP/xray-runtime-config-test"
+          mkdir -p "$TEST_PROJECT/src/main/kotlin/org/amnezia/vpn/protocol/xray"
+          mkdir -p "$TEST_PROJECT/src/test/kotlin/org/amnezia/vpn/protocol/xray"
+          cp client/android/xray/src/main/kotlin/XrayRuntimeConfig.kt \
+             "$TEST_PROJECT/src/main/kotlin/org/amnezia/vpn/protocol/xray/"
+          cp client/android/xray/src/test/kotlin/XrayRuntimeConfigTest.kt \
+             "$TEST_PROJECT/src/test/kotlin/org/amnezia/vpn/protocol/xray/"
+
+          cat > "$TEST_PROJECT/settings.gradle.kts" <<'EOF'
+          pluginManagement {
+              repositories {
+                  gradlePluginPortal()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "xray-runtime-config-test"
+          EOF
+
+          cat > "$TEST_PROJECT/build.gradle.kts" <<'EOF'
+          plugins {
+              kotlin("jvm") version "2.1.0"
+          }
+
+          repositories {
+              mavenCentral()
+          }
+
+          dependencies {
+              implementation("org.json:json:20240303")
+              testImplementation("junit:junit:4.13.2")
+          }
+
+          tasks.test {
+              useJUnit()
+          }
+          EOF
+
+      - name: Run Xray runtime config regression tests
+        shell: bash
+        run: |
+          chmod +x client/android/gradlew
+          client/android/gradlew \
+            -p "$RUNNER_TEMP/xray-runtime-config-test" \
+            test \
+            --stacktrace
+
+  android-apk:
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_PLATFORM: android-30
+      NDK_VERSION: 27.0.11718014
+      QT_VERSION: 6.10.3
+      QT_MODULES: 'qtremoteobjects qt5compat qtimageformats qtshadertools'
+      APP_ANDROID_MIN_SDK: 30
+      APP_ANDROID_MAX_SDK: ''
+      APP_ANDROID_VERSION_CODE_OFFSET: 1
+      PROD_AGW_PUBLIC_KEY: ''
+      PROD_S3_ENDPOINT: ''
+      FALLBACK_S3_ENDPOINT: ''
+      DEV_AGW_PUBLIC_KEY: ''
+      DEV_AGW_ENDPOINT: ''
+      DEV_S3_ENDPOINT: ''
+      FREE_V2_ENDPOINT: ''
+      PREM_V1_ENDPOINT: ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          fetch-depth: 10
+
+      - name: Install desktop Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: ${{ env.QT_MODULES }}
+          dir: ${{ runner.temp }}
+          py7zrversion: '==0.22.*'
+          extra: '--base ${{ env.QT_MIRROR }}'
+
+      - name: Install Android armv7 Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: linux
+          target: android
+          arch: android_armv7
+          modules: ${{ env.QT_MODULES }}
+          dir: ${{ runner.temp }}
+          py7zrversion: '==0.22.*'
+          extra: '--base ${{ env.QT_MIRROR }}'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK and NDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platforms;${{ env.ANDROID_PLATFORM }} ndk;${{ env.NDK_VERSION }}"
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Install Conan
+        run: pip install "conan==2.28.0"
+
+      - name: Generate temporary test signing key
+        shell: bash
+        run: |
+          keytool -genkeypair -noprompt \
+            -keystore "$GITHUB_WORKSPACE/android-test.keystore" \
+            -storepass changeit \
+            -keypass changeit \
+            -alias xraytest \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Xray Test Build,O=Amnezia Test,C=US"
+
+      - name: Build armeabi-v7a test APK
+        env:
+          QT_INSTALL_DIR: ${{ runner.temp }}
+          QT_ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/android-test.keystore
+          QT_ANDROID_KEYSTORE_ALIAS: xraytest
+          QT_ANDROID_KEYSTORE_STORE_PASS: changeit
+        shell: bash
+        run: |
+          deploy/build.sh \
+            -t android \
+            --sign \
+            --abi armeabi-v7a \
+            --build ./deploy/build/armeabi-v7a
+
+          mkdir -p deploy/artifacts
+          cp deploy/build/armeabi-v7a/client/android-build/AmneziaVPN.apk \
+             deploy/artifacts/AmneziaVPN_ccab29f_xray_test_armeabi-v7a.apk
+          sha256sum deploy/artifacts/AmneziaVPN_ccab29f_xray_test_armeabi-v7a.apk \
+            | tee deploy/artifacts/AmneziaVPN_ccab29f_xray_test_armeabi-v7a.apk.sha256
+
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: xray-endpoint-test-apk-ccab29f
+          path: |
+            deploy/artifacts/AmneziaVPN_ccab29f_xray_test_armeabi-v7a.apk
+            deploy/artifacts/AmneziaVPN_ccab29f_xray_test_armeabi-v7a.apk.sha256
+          retention-days: 7
