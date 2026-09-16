@@ -79,7 +79,7 @@ jobs:
     env:
       ANDROID_PLATFORM: android-30
       NDK_VERSION: 27.0.11718014
-      QT_VERSION: 6.10.3
+      QT_VERSION: 6.10.1
       QT_MODULES: 'qtremoteobjects qt5compat qtimageformats qtshadertools'
       APP_ANDROID_MIN_SDK: 30
       APP_ANDROID_MAX_SDK: ''
