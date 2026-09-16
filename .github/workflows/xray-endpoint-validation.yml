@@ -111,6 +111,10 @@ jobs:
           py7zrversion: '==0.22.*'
           extra: '--base ${{ env.QT_MIRROR }}'
 
+      - name: List available Android Qt versions
+        shell: bash
+        run: python3 -m aqt list-qt linux android
+
       - name: Install Android armv7 Qt
         uses: jurplel/install-qt-action@v4
         with:
